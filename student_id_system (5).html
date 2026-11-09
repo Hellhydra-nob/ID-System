@@ -1,0 +1,2033 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STUDENTS ID SYSTEM (Portrait + Multi-Camera Source Controls)</title>
+
+    <!-- Tailwind CSS Engine -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS Library for CSV/Excel Parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+    <style>
+        .export-host .no-print { display: none !important; }
+        .a4-page.guides .id-card-portrait { outline: 0.2mm dashed #94a3b8; outline-offset: 0.8mm; }
+        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; }
+        /* Exact ISO Standard ID-1 Vertical Portrait Dimensions: 54mm x 86mm */
+        .id-card-portrait {
+            width: 54mm;
+            height: 86mm;
+            box-sizing: border-box;
+            position: relative;
+            overflow: hidden;
+            background-color: #ffffff;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+        }
+
+
+        /* ===== UI polish ===== */
+        body { background: #eef1f6; }
+        .panel { background:#fff; border:1px solid #e2e8f0 !important; border-radius:16px !important; box-shadow:0 1px 2px rgba(15,23,42,.04); padding:0 !important; overflow:hidden; }
+        .panel-head { cursor:pointer; user-select:none; padding:14px 18px; background:linear-gradient(#fff,#f8fafc); border-bottom:1px solid #eef2f7; margin:0 !important; }
+        .panel-head:hover { background:#f1f5f9; }
+        .panel h2 { margin:0 !important; display:flex; align-items:center; font-size:12px !important; color:#334155; letter-spacing:.06em; }
+        .panel-body { padding:16px 18px 18px; margin:0 !important; }
+        .panel.collapsed .panel-body { display:none; }
+        .panel.collapsed .panel-head { border-bottom-color:transparent; }
+        .chev { display:inline-block; width:14px; margin-right:6px; color:#94a3b8; transition:transform .15s; font-size:11px; }
+        .panel.collapsed .chev { transform:rotate(-90deg); }
+        .panel input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]),
+        .panel select, #roster-search { border:1px solid #cbd5e1; border-radius:8px; background:#fff; transition:border-color .12s, box-shadow .12s; }
+        .panel input:focus, .panel select:focus, #roster-search:focus { outline:none; border-color:#6366f1 !important; box-shadow:0 0 0 3px rgba(99,102,241,.18); }
+        input[type=range], input[type=checkbox] { accent-color:#4f46e5; }
+        .panel label { color:#475569; }
+        .tb-btn { background:#fff; border:1px solid #cbd5e1; color:#334155; font-weight:700; font-size:11px; padding:3px 9px; border-radius:8px; }
+        .tb-btn:hover { background:#eef2ff; border-color:#a5b4fc; }
+        .chip { background:#eef2ff; color:#4338ca; font-size:11px; font-weight:700; padding:3px 10px; border-radius:999px; }
+        #preview-desk { background:#cbd5e1; }
+        .page-label { width:210mm; margin:0 auto 6px; font-size:11px; font-weight:700; color:#475569; letter-spacing:.04em; text-transform:uppercase; }
+        .hdr-btn { background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); color:#e2e8f0; font-size:12px; font-weight:700; padding:7px 12px; border-radius:10px; transition:background .12s; }
+        .hdr-btn:hover { background:rgba(255,255,255,.18); }
+        /* Card edge is an overlay (never changes layout) so preview, print and exports share identical geometry */
+        .card-edge { box-shadow:0 1px 3px rgba(15,23,42,.18); }
+        .card-edge::after { content:""; position:absolute; inset:0; border:1px solid #cbd5e1; pointer-events:none; z-index:25; }
+        .export-host .card-edge::after { display:none; }
+        /* Photo tools float over the card on hover - they take no layout space */
+        .card-tools { position:absolute; left:1.5mm; right:1.5mm; bottom:3.2mm; z-index:30; display:flex; justify-content:space-between; align-items:center; gap:2px;
+                      background:rgba(15,23,42,.9); color:#fff; padding:3px; border-radius:6px; opacity:0; transition:opacity .12s; }
+        .id-card-portrait:hover .card-tools { opacity:1; }
+        @media (hover:none) { .card-tools { opacity:.95; } }
+        .card-tools button { font-size:11px; line-height:1; padding:4px 5px; border-radius:4px; }
+        .card-tools .grp { display:flex; gap:2px; }
+        @keyframes cardflash { 0%,100% { box-shadow:0 0 0 0 rgba(99,102,241,0); } 30% { box-shadow:0 0 0 3mm rgba(99,102,241,.5); } }
+        .id-card-portrait.flash { animation:cardflash 1.4s ease 1; }
+        .toast-pill { background:#0f172a; color:#fff; font-size:12px; font-weight:600; padding:8px 16px; border-radius:999px; box-shadow:0 8px 24px rgba(15,23,42,.35); display:flex; gap:12px; align-items:center; }
+        .toast-pill button { color:#a5b4fc; font-weight:800; }
+        .toast-pill button:hover { color:#fff; text-decoration:underline; }
+        #bulk-bar .tb-btn.danger { color:#dc2626; }
+        kbd { background:#f1f5f9; border:1px solid #cbd5e1; border-bottom-width:2px; border-radius:5px; padding:1px 6px; font-size:11px; font-family:inherit; font-weight:700; color:#334155; }
+        .cl-step { display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:8px; cursor:pointer; }
+        .cl-step:hover { background:#f1f5f9; }
+        .cl-dot { width:18px; height:18px; border-radius:999px; border:2px solid #cbd5e1; display:flex; align-items:center; justify-content:center; font-size:10px; color:#fff; flex:none; }
+        .cl-step.done .cl-dot { background:#10b981; border-color:#10b981; }
+        .cl-step.done .cl-label { color:#94a3b8; text-decoration:line-through; }
+        .cl-hint { color:#94a3b8; font-size:10px; margin-left:auto; white-space:nowrap; }
+        .tb-btn:disabled { opacity:.4; cursor:default; }
+
+        /* Dynamic Typography Styles */
+        .font-sans-custom { font-family: ui-sans-serif, system-ui, sans-serif; }
+        .font-serif-custom { font-family: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif; }
+        .font-mono-custom { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+        .font-condensed-custom { font-family: 'Arial Narrow', 'Trebuchet MS', sans-serif; }
+
+        /* Fixed Grid A4 Layout (3 Columns x 3 Rows = 9 Cards per Page) */
+        .a4-page {
+            width: 210mm;
+            height: 297mm;
+            padding: 10mm;
+            margin: 0 auto 10mm auto;
+            background: white;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            display: grid;
+            grid-template-columns: repeat(3, 54mm);
+            grid-template-rows: repeat(3, 86mm);
+            column-gap: 6mm;
+            row-gap: 6mm;
+            box-sizing: border-box;
+            page-break-after: always;
+            break-after: page;
+        }
+
+        /* Strict Print Rules for 100% Actual Scale */
+        @page {
+            size: A4 portrait;
+            margin: 0;
+        }
+
+        @media print {
+            html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                background: white !important;
+            }
+            header, section:first-of-type, .no-print {
+                display: none !important;
+            }
+            main {
+                display: block !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                max-width: none !important;
+            }
+            #print-area {
+                margin: 0 !important;
+                padding: 0 !important;
+            }
+            .a4-page {
+                box-shadow: none !important;
+                margin: 0 !important;
+                page-break-after: always !important;
+                break-after: page !important;
+            }
+            .missing-photo-flag {
+                border-color: #1e293b !important;
+            }
+            /* print is always true size, whatever zoom the on-screen preview is using */
+            #print-area { zoom: 1 !important; }
+            #preview-desk { padding: 0 !important; background: none !important; overflow: visible !important; border-radius: 0 !important; }
+            .card-edge { box-shadow: none !important; }
+            .card-edge::after { display: none !important; }
+            body { background: white !important; }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 min-h-screen font-sans pb-12">
+
+    <!-- Header Navigation -->
+    <header class="sticky top-0 z-40 bg-slate-900/95 backdrop-blur text-white px-6 py-3 shadow-lg flex justify-between items-center flex-wrap gap-3 border-b border-indigo-400/20">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center text-lg shadow">🪪</div>
+            <div>
+                <h1 class="text-base font-bold tracking-wide leading-tight">STUDENTS ID SYSTEM</h1>
+                <p class="text-[11px] text-slate-400">Portrait 54 × 86 mm · 3×3 A4 duplex sheets · preview is true print size</p>
+            </div>
+        </div>
+        <div class="flex gap-2 flex-wrap items-center">
+            <span id="autosave-indicator" class="text-[10px] text-slate-400 mr-1"></span>
+            <button onclick="undo()" id="btn-undo" class="hdr-btn" title="Undo (Ctrl+Z)">↶</button>
+            <button onclick="redo()" id="btn-redo" class="hdr-btn" title="Redo (Ctrl+Y)">↷</button>
+            <button onclick="downloadSampleCSV()" class="hdr-btn">📥 Sample CSV</button>
+            <button onclick="exportProject()" class="hdr-btn">💾 Save Project</button>
+            <button onclick="document.getElementById('project-import-input').click()" class="hdr-btn">📂 Load Project</button>
+            <input type="file" id="project-import-input" accept=".json" class="hidden">
+            <button onclick="toggleHelp()" class="hdr-btn" title="Tips & shortcuts (?)">?</button>
+            <button onclick="openExport()" class="bg-emerald-500 hover:bg-emerald-400 text-white text-xs font-bold px-4 py-2 rounded-xl shadow transition">🖨️ Print / Download IDs</button>
+        </div>
+    </header>
+
+    <main class="max-w-[1700px] mx-auto mt-6 px-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        <!-- Controls & Data Input Panel (Left Column) -->
+        <section id="control-panel" class="lg:col-span-4 space-y-4 lg:sticky lg:overflow-y-auto lg:pr-1" style="top:calc(var(--hdr-h,64px) + 1rem);max-height:calc(100vh - var(--hdr-h,64px) - 2rem)">
+            
+            <!-- Quick start checklist -->
+            <div id="checklist" class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-xs font-bold uppercase tracking-wider text-slate-700">Quick start</span>
+                    <span id="cl-pct" class="chip">0%</span>
+                </div>
+                <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden mb-2"><div id="cl-bar" class="h-full bg-indigo-500 transition-all" style="width:0%"></div></div>
+                <div id="cl-steps" class="text-xs"></div>
+            </div>
+
+            <!-- 1. CSV / Excel Import -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-emerald-500">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700 mb-2">1. Spreadsheet Data Import</h2>
+                <p class="text-[11px] text-slate-500 mb-3">Upload a <b>.csv</b> or <b>.xlsx</b> file — or just <b>drag &amp; drop</b> it anywhere on this page. Column names are matched flexibly (<i>Last Name, FirstName, LRN, Birthday, Guardian, Contact, Grade, Section, Address, Sex, Blood Type, Photo…</i>). Need a starting point? Use <b>📥 Sample CSV</b> at the top.</p>
+                <input type="file" id="spreadsheet-upload" accept=".csv, .xlsx, .xls" class="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100">
+            </div>
+
+            <!-- 1b. Student Roster: Search, Manual Add/Edit/Delete, Sort -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-amber-500 space-y-3">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">Student Roster</h2>
+                    <div class="flex gap-2"><button onclick="exportRosterCSV()" class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-[11px] font-bold px-3 py-1.5 rounded-lg transition" title="Download the roster as CSV">⬇ CSV</button><button onclick="addBlankStudent()" class="bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition">➕ Add Student</button></div>
+                </div>
+
+                <div id="validation-summary" class="flex flex-wrap gap-2 text-[10px]"></div>
+
+                <div class="flex gap-2">
+                    <input type="text" id="roster-search" oninput="buildRosterTable()" placeholder="🔍 Search name, LRN, grade, section..." class="flex-1 text-xs p-2 border rounded-lg outline-none focus:ring-2 focus:ring-amber-400">
+                    <select id="roster-sort" onchange="sortStudents()" class="text-xs p-2 border rounded-lg outline-none">
+                        <option value="">Sort...</option>
+                        <option value="last-asc">Last Name A→Z</option>
+                        <option value="last-desc">Last Name Z→A</option>
+                        <option value="lrn">LRN</option>
+                    </select>
+                    <select id="roster-filter" onchange="buildRosterTable()" class="text-xs p-2 border rounded-lg outline-none" title="Filter the roster">
+                        <option value="">All</option>
+                        <option value="nophoto">No photo</option>
+                        <option value="issues">Has issues</option>
+                    </select>
+                </div>
+
+                <div id="bulk-bar" class="hidden flex items-center gap-2 flex-wrap bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-[11px]">
+                    <b id="bulk-count" class="text-indigo-800"></b>
+                    <button class="tb-btn" onclick="bulkSetGradeSection()">Set grade / section</button>
+                    <button class="tb-btn" onclick="openExport()">🖨️ Print selected</button>
+                    <button class="tb-btn danger" onclick="bulkDelete()">Delete</button>
+                    <button class="tb-btn" onclick="clearSelection()">Clear</button>
+                </div>
+
+                <div class="max-h-72 overflow-auto border border-slate-100 rounded-xl">
+                    <table class="w-full text-[11px]">
+                        <thead class="bg-slate-50 sticky top-0">
+                            <tr class="text-left text-slate-500">
+                                <th class="p-2"><input type="checkbox" id="select-all" title="Select all" onchange="toggleSelectAll(this.checked)"></th>
+                                <th class="p-2">Photo</th>
+                                <th class="p-2">Last</th>
+                                <th class="p-2">First</th>
+                                <th class="p-2">MI</th>
+                                <th class="p-2">LRN</th>
+                                <th class="p-2">Birthday</th>
+                                <th class="p-2">Guardian</th>
+                                <th class="p-2">Contact</th>
+                                <th class="p-2">Grade</th>
+                                <th class="p-2">Section</th>
+                                <th class="p-2">Address</th>
+                                <th class="p-2">Sex</th>
+                                <th class="p-2">Blood</th>
+                                <th class="p-2"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="roster-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 2. Photos Upload & Camera Capture Mode -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-blue-500 space-y-4">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">2. Student Photos Options</h2>
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Option A: Upload Bulk Files</label>
+                    <input type="file" id="photo-bulk-upload" multiple accept="image/*" class="w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+                </div>
+
+                <div class="border-t border-slate-100 pt-3">
+                    <label class="block text-xs font-semibold text-slate-600 mb-2">Option B: Connect Live Camera / Phone / External Device</label>
+                    <button id="toggle-cam-btn" onclick="toggleCamera()" class="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 rounded-xl transition flex items-center justify-center gap-2">
+                        📷 Open Camera Stream
+                    </button>
+
+                    <div id="camera-container" class="hidden mt-3 p-3 bg-slate-900 rounded-xl flex flex-col items-center gap-3">
+                        <div class="w-full text-left space-y-1">
+                            <label class="block text-[10px] font-bold uppercase tracking-wider text-slate-400">Select Camera Source</label>
+                            <select id="camera-select" onchange="switchCameraSource()" class="w-full text-xs p-2 rounded-lg border border-slate-700 bg-slate-800 text-white outline-none focus:ring-1 focus:ring-blue-400">
+                                <option value="">Detecting camera hardware...</option>
+                            </select>
+                        </div>
+
+                        <video id="webcam-stream" autoplay playsinline class="w-full rounded-lg bg-black h-48 object-cover border border-slate-800"></video>
+                        <canvas id="snapshot-canvas" class="hidden"></canvas>
+                        
+                        <div class="w-full space-y-2">
+                            <input type="text" id="captured-photo-label" placeholder="Enter Photo Name/Filename (e.g. juan.jpg)" class="w-full text-xs p-2 rounded-lg border border-slate-700 bg-slate-800 text-white outline-none focus:ring-1 focus:ring-blue-400">
+                            <button onclick="capturePhoto()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs py-2 rounded-lg transition">
+                                📸 Snap & Assign Photo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-100 pt-3">
+                    <button onclick="togglePhotoManager()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2 rounded-xl transition flex items-center justify-center gap-2">
+                        🖼️ Edit / Rename Uploaded Photos (<span id="photo-count-badge">0</span>)
+                    </button>
+                </div>
+            </div>
+
+            <!-- 5. Global Settings -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700 mb-3">3. Institutional Details</h2>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-semibold mb-1">School Name</label>
+                        <input type="text" id="school-name" value="APEX NATIONAL HIGH SCHOOL" oninput="renderAllCards()" class="w-full border rounded-lg p-2 outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block font-semibold mb-1">Principal's Name</label>
+                        <input type="text" id="principal-name" value="Dr. Eleanor Vance, Ph.D." oninput="renderAllCards()" class="w-full border rounded-lg p-2 outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Templates & Signatures -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700 mb-3">4. ID Design & Signature</h2>
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block font-semibold mb-1">Front Background Template</label>
+                        <input type="file" id="front-bg-upload" accept="image/*" class="w-full text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-100">
+                    </div>
+                    <div>
+                        <label class="block font-semibold mb-1">Back Background Template</label>
+                        <input type="file" id="back-bg-upload" accept="image/*" class="w-full text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-100">
+                    </div>
+                    <div>
+                        <label class="block font-semibold mb-1">Principal's Signature</label>
+                        <input type="file" id="sig-upload" accept="image/*" class="w-full text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-100">
+                    </div>
+                    <div class="border-t pt-3">
+                        <p class="font-semibold mb-2 text-slate-700">Photo, Principal &amp; Signature Sizes</p>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label>Photo width (mm)<input type="number" id="photo-w" value="28" min="10" max="50" step="0.5" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                            <label>Photo height (mm)<input type="number" id="photo-h" value="34" min="10" max="60" step="0.5" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                            <label>Principal name (px)<input type="number" id="prin-name-px" value="7" min="3" max="16" step="0.5" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                            <label>"School Principal" text (px)<input type="number" id="prin-title-px" value="5.5" min="3" max="14" step="0.5" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                            <label>Signature height (px)<input type="number" id="sig-h" value="24" min="8" max="80" step="1" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                        </div>
+                        <p class="text-[11px] text-slate-500 mt-1">Changes apply instantly to the preview, print and image export.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. Fine-Grained Typography & Positioning Controls -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-purple-500 space-y-4">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">5. Typography & Element Positioning</h2>
+                
+                <div class="text-xs space-y-3">
+                    <div class="flex justify-end"><button type="button" onclick="resetDesign()" class="text-[11px] text-slate-500 hover:text-red-600 font-semibold underline">↺ Reset design to defaults</button></div>
+                    <div>
+                        <label class="block font-semibold mb-1">Global Font Family</label>
+                        <select id="font-family-select" onchange="renderAllCards()" class="w-full border rounded-lg p-2 outline-none focus:ring-2 focus:ring-purple-500">
+                            <option value="font-sans-custom">Sans-Serif (Modern / Clean)</option>
+                            <option value="font-serif-custom">Serif (Traditional / Formal)</option>
+                            <option value="font-mono-custom">Monospace (Technical)</option>
+                            <option value="font-condensed-custom">Condensed (Compact)</option>
+                        </select>
+                    </div>
+
+                    <!-- Name Font Settings -->
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                        <span class="font-bold text-slate-700 block text-[11px] uppercase">Student Name Customization</span>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="text-[10px] text-slate-500">Size (px)</label>
+                                <input type="number" id="name-font-size" value="11" oninput="renderAllCards()" class="w-full border p-1 rounded">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Color</label>
+                                <input type="color" id="name-color" value="#0f172a" oninput="renderAllCards()" class="w-full h-7 border rounded p-0">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Nudge Y (px)</label>
+                                <input type="number" id="name-offset-y" value="0" oninput="renderAllCards()" class="w-full border p-1 rounded">
+                            </div>
+                        </div>
+                        <div class="flex gap-4 pt-1">
+                            <label class="flex items-center gap-1 font-bold text-slate-700"><input type="checkbox" id="name-bold" onchange="renderAllCards()" checked> Bold</label>
+                            <label class="flex items-center gap-1 italic text-slate-700"><input type="checkbox" id="name-italic" onchange="renderAllCards()"> Italic</label>
+                        </div>
+                    </div>
+
+                    <!-- LRN / Meta Font Settings -->
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                        <span class="font-bold text-slate-700 block text-[11px] uppercase">LRN & Birthday Details</span>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="text-[10px] text-slate-500">Size (px)</label>
+                                <input type="number" id="meta-font-size" value="8" oninput="renderAllCards()" class="w-full border p-1 rounded">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Color</label>
+                                <input type="color" id="meta-color" value="#1e3a8a" oninput="renderAllCards()" class="w-full h-7 border rounded p-0">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Nudge Y (px)</label>
+                                <input type="number" id="meta-offset-y" value="0" oninput="renderAllCards()" class="w-full border p-1 rounded">
+                            </div>
+                        </div>
+                        <div class="flex gap-4 pt-1">
+                            <label class="flex items-center gap-1 font-bold text-slate-700"><input type="checkbox" id="meta-bold" onchange="renderAllCards()" checked> Bold</label>
+                        </div>
+                    </div>
+
+                    <!-- Header Font Settings -->
+                    <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                        <span class="font-bold text-slate-700 block text-[11px] uppercase">School Header Text</span>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div>
+                                <label class="text-[10px] text-slate-500">Size (px)</label>
+                                <input type="number" id="header-font-size" value="8" oninput="renderAllCards()" class="w-full border p-1 rounded">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Color</label>
+                                <input type="color" id="header-color" value="#1e3a8a" oninput="renderAllCards()" class="w-full h-7 border rounded p-0">
+                            </div>
+                            <div>
+                                <label class="text-[10px] text-slate-500">Nudge Y (px)</label>
+                                <input type="number" id="header-offset-y" value="0" oninput="renderAllCards()" class="w-full border p-1 rounded">
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- 7. Branding -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-cyan-500 space-y-3">
+                <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">6. Branding & Card Details</h2>
+                <div class="text-xs space-y-3">
+                    <div>
+                        <label class="block font-semibold mb-1">School Logo (shown in the front header)</label>
+                        <input type="file" id="logo-upload" accept="image/*" class="w-full text-slate-500 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:bg-slate-100">
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <label>Logo height (mm)<input type="number" id="logo-height" value="9" min="4" max="20" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                        <label>Accent color<input type="color" id="accent-color" value="#1e3a8a" oninput="renderAllCards()" class="w-full h-7 border rounded p-0"></label>
+                        <label>School year<input type="text" id="school-year" value="S.Y. 2026-2027" oninput="renderAllCards()" class="w-full border p-1 rounded"></label>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="clearLogo()" class="text-[11px] text-red-600 hover:underline font-semibold">Remove logo</button>
+                    </div>
+                    <p class="text-[11px] text-slate-500">The accent color draws top and bottom bars on any side that has no uploaded background template.</p>
+                </div>
+            </div>
+
+            <!-- 6. QR Code -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-rose-500 space-y-3">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-sm font-bold uppercase tracking-wider text-slate-700">7. Back QR Code (Learner Info)</h2>
+                    <label class="flex items-center gap-1 text-xs font-bold text-slate-700"><input type="checkbox" id="qr-on" checked onchange="renderAllCards()"> Show</label>
+                </div>
+                <p class="text-[11px] text-slate-500">Each ID gets its own QR code, centered on the back. Choose what the QR contains:</p>
+                <div id="qr-fields" class="grid grid-cols-2 gap-x-3 gap-y-1 text-xs bg-slate-50 border rounded-xl p-3"></div>
+                <div class="text-xs space-y-2">
+                    <label class="block">Size: <b><span id="qr-size-val"></span> mm</b>
+                        <input type="range" id="qr-size" data-bc min="15" max="50" step="1" value="28" oninput="bcLabel(this);renderAllCards()" class="w-full"></label>
+                    <label class="block">Vertical position (0 = exact center): <b><span id="qr-y-val"></span> mm</b>
+                        <input type="range" id="qr-y" data-bc min="-30" max="30" step="0.5" value="4" oninput="bcLabel(this);renderAllCards()" class="w-full"></label>
+                    <div class="flex flex-wrap gap-4 items-center">
+                        <label class="flex items-center gap-1"><input type="checkbox" id="qr-text" checked onchange="renderAllCards()"> LRN text below</label>
+                        <label class="flex items-center gap-1"><input type="checkbox" id="qr-white" checked onchange="renderAllCards()"> White backing</label>
+                        <label class="flex items-center gap-1">Text px <input type="number" id="qr-textsize" value="7" min="4" max="14" oninput="renderAllCards()" class="w-12 border rounded p-1"></label>
+                        <label class="flex items-center gap-1">Color <input type="color" id="qr-color" value="#000000" oninput="renderAllCards()" class="w-8 h-6 border rounded p-0"></label>
+                        <label class="flex items-center gap-1">Error correction
+                            <select id="qr-ec" onchange="renderAllCards()" class="border rounded p-1"><option value="L">L (7%)</option><option value="M" selected>M (15%)</option><option value="Q">Q (25%)</option><option value="H">H (30%)</option></select></label>
+                    </div>
+                    <p id="bc-info" class="text-[11px] font-semibold"></p>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- Preview & Output Area (Right Column) -->
+        <section class="lg:col-span-8 min-w-0">
+            <div class="no-print sticky z-30 mb-4 bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-sm px-4 py-3 space-y-2" style="top:calc(var(--hdr-h,64px) + .75rem)">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                        <h2 class="text-sm font-bold text-slate-800">A4 Duplex Print Preview <span class="text-slate-400 font-medium">(9 cards / sheet)</span></h2>
+                        <p class="text-[11px] text-slate-500">At <b>100%</b> the preview is exactly the printed size. Hover a card for photo tools.</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="chip" id="student-count">0 Student Cards</span>
+                        <button onclick="confirmClearAllData()" class="text-xs text-red-600 hover:underline font-semibold">Clear All Data</button>
+                    </div>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] border-t border-slate-100 pt-2">
+                    <label class="flex items-center gap-1.5 font-semibold text-slate-600"><input type="checkbox" id="duplex-mirror" checked onchange="renderAllCards()"> Mirror back page for duplex</label>
+                    <label class="flex items-center gap-1.5 font-semibold text-slate-600"><input type="checkbox" id="cut-guides" checked onchange="renderAllCards()"> Cut guides</label>
+                    <label class="flex items-center gap-1.5 font-semibold text-slate-600">Sides
+                        <select id="print-sides" onchange="renderAllCards()" class="border rounded-lg p-1">
+                            <option value="both">Front + Back</option>
+                            <option value="front">Front Only</option>
+                            <option value="back">Back Only</option>
+                        </select>
+                    </label>
+                    <div class="flex items-center gap-1.5 ml-auto">
+                        <span class="font-semibold text-slate-600">Zoom</span>
+                        <button class="tb-btn" onclick="stepPreviewZoom(-10)" title="Zoom out">−</button>
+                        <input type="range" id="preview-zoom" min="30" max="200" step="5" value="100" oninput="setPreviewZoom(this.value)" class="w-28">
+                        <button class="tb-btn" onclick="stepPreviewZoom(10)" title="Zoom in">+</button>
+                        <b id="preview-zoom-val" class="w-10 text-center text-slate-700">100%</b>
+                        <button class="tb-btn" onclick="setPreviewZoom(100)" title="True printed size">Actual size</button>
+                        <button class="tb-btn" onclick="fitPreviewWidth()">Fit width</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Container for Dynamically Generated A4 Pages -->
+            <div id="preview-desk" class="overflow-x-auto rounded-2xl p-4">
+                <div id="print-area">
+                    <!-- Dynamic multi-page rendering -->
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modal Drawer: Manage & Rename Photos -->
+    <div id="photo-manager-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
+            <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+                <h3 class="font-bold text-sm tracking-wide">Manage & Rename Uploaded Photos</h3>
+                <button onclick="togglePhotoManager()" class="text-slate-400 hover:text-white font-bold text-sm">✕ Close</button>
+            </div>
+            
+            <div class="p-4 overflow-y-auto flex-1 space-y-3" id="photo-manager-list">
+                <!-- Dynamically Populated Photo Items -->
+            </div>
+
+            <div class="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                <button onclick="togglePhotoManager()" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl transition">
+                    Done & Update IDs
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export / Print modal -->
+    <div id="export-modal" class="fixed inset-0 bg-slate-900/60 hidden z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-md w-full shadow-2xl overflow-hidden">
+            <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+                <h3 class="font-bold text-sm">Print / Download IDs</h3>
+                <button onclick="closeExport()" class="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+            <div class="p-5 space-y-3 text-xs">
+                <label class="block font-semibold">Students
+                    <select id="exp-scope" onchange="updateExportInfo()" class="w-full border rounded-lg p-2 mt-1"></select></label>
+                <label class="block font-semibold">Output type
+                    <select id="exp-format" onchange="updateExportInfo()" class="w-full border rounded-lg p-2 mt-1">
+                        <option value="print">🖨️ Print / Save PDF (A4 sheet, 9 per page)</option>
+                        <option value="png">🖼️ PNG – individual image per student</option>
+                        <option value="jpg">🖼️ JPG – individual image per student</option>
+                    </select></label>
+                <label class="block font-semibold">Sides
+                    <select id="exp-sides" class="w-full border rounded-lg p-2 mt-1">
+                        <option value="both">Front + Back</option>
+                        <option value="front">Front only</option>
+                        <option value="back">Back only</option>
+                    </select></label>
+                <div id="exp-image-opts" class="grid grid-cols-2 gap-3 hidden">
+                    <label class="block font-semibold">Resolution
+                        <select id="exp-dpi" class="w-full border rounded-lg p-2 mt-1">
+                            <option value="150">150 DPI (small)</option>
+                            <option value="300" selected>300 DPI (print quality)</option>
+                            <option value="600">600 DPI (max)</option>
+                        </select></label>
+                    <label class="block font-semibold" id="exp-q-wrap">JPG quality
+                        <select id="exp-quality" class="w-full border rounded-lg p-2 mt-1">
+                            <option value="0.8">Good</option><option value="0.92" selected>High</option><option value="1">Maximum</option>
+                        </select></label>
+                </div>
+                <p id="exp-info" class="text-[11px] text-slate-500"></p>
+                <p id="exp-progress" class="text-[11px] font-bold text-blue-700"></p>
+            </div>
+            <div class="p-4 border-t bg-slate-50 flex justify-end gap-2">
+                <button onclick="closeExport()" class="text-xs font-bold px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300">Cancel</button>
+                <button id="exp-go" onclick="runExport()" class="text-xs font-bold px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white">Go</button>
+            </div>
+        </div>
+    </div>
+    <div id="drop-overlay" class="no-print hidden fixed inset-0 z-[90] bg-indigo-600/85 text-white flex items-center justify-center pointer-events-none">
+        <div class="text-center">
+            <div class="text-5xl mb-3">📂</div>
+            <p class="text-xl font-bold">Drop files to import</p>
+            <p class="text-sm opacity-90 mt-1">Spreadsheet (.csv / .xlsx) · photos (.jpg / .png) · project (.json)</p>
+        </div>
+    </div>
+
+    <div id="help-modal" class="no-print fixed inset-0 bg-slate-900/60 hidden z-50 flex items-center justify-center p-4" onclick="if(event.target===this)toggleHelp()">
+        <div class="bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
+            <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+                <h3 class="font-bold text-sm">Tips &amp; shortcuts</h3>
+                <button onclick="toggleHelp()" class="text-slate-400 hover:text-white text-sm font-bold">✕</button>
+            </div>
+            <div class="p-5 text-xs text-slate-600 space-y-3">
+                <div class="grid grid-cols-2 gap-x-6 gap-y-2">
+                    <div><kbd>Ctrl</kbd>+<kbd>Z</kbd> Undo</div>
+                    <div><kbd>Ctrl</kbd>+<kbd>Y</kbd> Redo</div>
+                    <div><kbd>Ctrl</kbd>+<kbd>S</kbd> Save project file</div>
+                    <div><kbd>Esc</kbd> Close any window</div>
+                    <div><kbd>?</kbd> This help</div>
+                </div>
+                <ul class="list-disc pl-5 space-y-1.5">
+                    <li><b>Drag &amp; drop</b> a spreadsheet, photos or a saved project anywhere on the page.</li>
+                    <li>Photos are matched to students by <i>PhotoFileName</i>, <i>LRN</i>, or <i>Last_First</i> file names.</li>
+                    <li>Hover a card for photo tools; drag the photo to reposition and scroll to zoom.</li>
+                    <li>Tick students in the roster to print, edit or delete them in bulk. Use 📍 to jump to a student's card.</li>
+                    <li>Deletes, imports and edits can be undone. Everything autosaves in this browser — use <b>Save Project</b> for a backup file.</li>
+                    <li>The preview is true size at 100% zoom. Print with Scale 100% and Margins: None.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <!-- Hidden input used for click-to-upload of a single student's photo directly on a card -->
+    <input type="file" id="single-photo-input" accept="image/*" class="hidden">
+
+    <!-- JS Engine -->
+    <script>
+        let students = [];
+        let photosMap = {};
+        let mediaStream = null;
+        let dragState = null;
+        let pendingPhotoStudentId = null;
+        const STORAGE_KEY = 'student_id_system_autosave_v1';
+
+        const PLACEHOLDER_SVG = `<svg xmlns='http://www.w3.org/2000/svg' width='150' height='190'><rect width='100%' height='100%' fill='#e2e8f0'/><text x='50%' y='50%' font-family='sans-serif' font-size='14' text-anchor='middle' fill='#94a3b8'>No Photo</text></svg>`;
+        const PLACEHOLDER_PHOTO = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(PLACEHOLDER_SVG);
+        let frontBgUrl = '';
+        let backBgUrl = '';
+        let signatureUrl = '';
+
+        // Formats a birthday into "Month DD, YYYY". Handles text, Date objects and Excel serial numbers.
+        function formatBirthday(v) {
+            if (v === undefined || v === null || v === '' || v === 'N/A') return 'N/A';
+            const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+            const fmt = (y, m, d) => `${months[m]} ${d}, ${y}`;
+            if (v instanceof Date) return isNaN(v) ? 'N/A' : fmt(v.getFullYear(), v.getMonth(), v.getDate());
+            if (typeof v === 'number' && v > 10000 && v < 60000) {          // Excel serial date
+                const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
+                return fmt(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+            }
+            const str = String(v).trim();
+            let m = str.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+            if (m) return fmt(+m[1], +m[2] - 1, +m[3]);
+            m = str.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+            if (m) { let mo = +m[1], da = +m[2]; if (mo > 12) { const t = mo; mo = da; da = t; } return fmt(+m[3], mo - 1, da); }
+            const dt = new Date(str);
+            return isNaN(dt.getTime()) ? str : fmt(dt.getFullYear(), dt.getMonth(), dt.getDate());
+        }
+
+        // =====================================================================
+        // Undo / redo (roster + photos), toast with action
+        // =====================================================================
+        const undoStack = [], redoStack = [];
+        let lastSnapKind = '', lastSnapTime = 0;
+        function stateCopy() { return { students: students.map(s => ({ ...s })), photosMap: { ...photosMap } }; }
+        function snapshot(kind = '') {
+            const now = Date.now();
+            if (kind && kind === lastSnapKind && now - lastSnapTime < 1200) { lastSnapTime = now; return; }
+            lastSnapKind = kind; lastSnapTime = now;
+            undoStack.push(stateCopy());
+            if (undoStack.length > 40) undoStack.shift();
+            redoStack.length = 0;
+            updateUndoButtons();
+        }
+        function applyState(st) {
+            students = st.students.map(s => ({ ...s }));
+            photosMap = { ...st.photosMap };
+            selectedIds.clear();
+            renderAllCards();
+            updatePhotoBadge();
+        }
+        function undo() {
+            if (!undoStack.length) { toast('Nothing to undo'); return; }
+            redoStack.push(stateCopy());
+            applyState(undoStack.pop());
+            lastSnapKind = ''; updateUndoButtons(); toast('Undone');
+        }
+        function redo() {
+            if (!redoStack.length) { toast('Nothing to redo'); return; }
+            undoStack.push(stateCopy());
+            applyState(redoStack.pop());
+            lastSnapKind = ''; updateUndoButtons(); toast('Redone');
+        }
+        function updateUndoButtons() {
+            const u = document.getElementById('btn-undo'), r = document.getElementById('btn-redo');
+            if (u) u.style.opacity = undoStack.length ? 1 : .4;
+            if (r) r.style.opacity = redoStack.length ? 1 : .4;
+        }
+
+        // --- Spreadsheet Upload & Parsing (flexible headers, Excel dates, replace/append) ---
+        let idCounter = Date.now();
+        function nextId() { return ++idCounter; }
+
+        const HEADER_ALIASES = {
+            firstName: ['firstname', 'first', 'givenname', 'fname'],
+            lastName: ['lastname', 'last', 'surname', 'familyname', 'lname'],
+            mi: ['mi', 'middleinitial', 'middlename', 'middle'],
+            lrn: ['lrn', 'lrnno', 'lrnnumber', 'learnerreferencenumber'],
+            birthday: ['birthday', 'birthdate', 'birthdayday', 'dob', 'dateofbirth', 'birth'],
+            guardian: ['guardian', 'guardianname', 'parent', 'parentguardian', 'parentname'],
+            contact: ['contact', 'contactnumber', 'contactno', 'phone', 'phonenumber', 'mobile', 'guardiancontact'],
+            grade: ['grade', 'gradelevel', 'yearlevel', 'year'],
+            section: ['section'],
+            address: ['address', 'homeaddress'],
+            sex: ['sex', 'gender'],
+            blood: ['bloodtype', 'blood'],
+            photo: ['photofilename', 'photo', 'photofile', 'photoname', 'filename', 'image']
+        };
+        const normKey = k => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        function importRows(rows, sourceName) {
+            const out = [];
+            let foundNameCol = false;
+            rows.forEach((row, index) => {
+                const n = {};
+                Object.keys(row).forEach(k => { n[normKey(k)] = row[k]; });
+                const get = key => {
+                    for (const a of HEADER_ALIASES[key]) {
+                        if (a in n) { if (key === 'firstName' || key === 'lastName') foundNameCol = true; if (String(n[a]).trim() !== '') return n[a]; }
+                    }
+                    return '';
+                };
+                const first = String(get('firstName')).trim(), last = String(get('lastName')).trim(), lrn = String(get('lrn')).trim();
+                if (!first && !last && !lrn) return;                          // skip blank rows
+                const photoFileName = String(get('photo')).trim();
+                let mi = String(get('mi')).trim();
+                if (mi.length > 2) mi = mi[0];
+                const bday = get('birthday');
+                out.push({
+                    id: nextId(),
+                    firstName: first || 'Student',
+                    lastName: last || `Record ${index + 1}`,
+                    mi: mi.replace(/\.$/, ''),
+                    lrn: lrn || 'N/A',
+                    Birthday: formatBirthday(bday),
+                    guardian: String(get('guardian')).trim() || 'Parent / Guardian',
+                    contact: String(get('contact')).trim() || 'N/A',
+                    grade: String(get('grade')).trim(),
+                    section: String(get('section')).trim(),
+                    address: String(get('address')).trim(),
+                    sex: String(get('sex')).trim(),
+                    bloodType: String(get('blood')).trim(),
+                    photoFileName: photoFileName,
+                    photo: PLACEHOLDER_PHOTO,
+                    zoom: 1, offsetX: 0, offsetY: 0
+                });
+            });
+            if (!out.length) { toast('No student rows found in ' + sourceName + '. Check the column headers (see Sample CSV).'); return; }
+
+            let replace = true;
+            if (students.length > 0) {
+                replace = confirm(`The roster already has ${students.length} student(s).\n\nOK = REPLACE them with the ${out.length} imported student(s)\nCancel = ADD the imported students to the existing roster`);
+            }
+            snapshot();
+            students = replace ? out : students.concat(out);
+            syncPhotosWithStudents();
+            const withPhoto = out.filter(s => s.photo !== PLACEHOLDER_PHOTO).length;
+            let msg = `Imported ${out.length} student(s)`;
+            if (Object.keys(photosMap).length) msg += ` · ${withPhoto} photo(s) matched`;
+            if (!foundNameCol) msg += ' · ⚠ no First/Last name columns found';
+            toast(msg, { label: 'Undo', fn: undo });
+        }
+
+        function importSpreadsheetFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                try {
+                    const workbook = XLSX.read(new Uint8Array(evt.target.result), { type: 'array' });
+                    const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+                    importRows(XLSX.utils.sheet_to_json(worksheet, { defval: "" }), file.name);
+                } catch (err) {
+                    console.error(err);
+                    toast('Could not read ' + file.name + ' (' + err.message + ')');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        document.getElementById('spreadsheet-upload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) importSpreadsheetFile(file);
+            e.target.value = '';
+        });
+
+        // --- Photo Batch Upload Handler (reads to persistent data URLs, not blob URLs) ---
+        function fileToDataURL(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        // Shrinks big phone/camera photos (max 800px) so projects stay small and autosave keeps working
+        function photoToDataURL(file, maxSide = 800) {
+            return new Promise(resolve => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                const fallback = () => { URL.revokeObjectURL(url); fileToDataURL(file).then(resolve); };
+                img.onload = () => {
+                    try {
+                        const sc = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+                        if (sc >= 1 && file.size < 300000) return fallback();
+                        const c = document.createElement('canvas');
+                        c.width = Math.max(1, Math.round(img.naturalWidth * sc));
+                        c.height = Math.max(1, Math.round(img.naturalHeight * sc));
+                        const ctx = c.getContext('2d');
+                        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+                        ctx.drawImage(img, 0, 0, c.width, c.height);
+                        URL.revokeObjectURL(url);
+                        resolve(c.toDataURL('image/jpeg', 0.9));
+                    } catch (err) { fallback(); }
+                };
+                img.onerror = fallback;
+                img.src = url;
+            });
+        }
+
+        async function handleBulkPhotoFiles(fileList) {
+            const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+            if (!files.length) return;
+            snapshot();
+            toast(`Processing ${files.length} photo(s)…`);
+            const keys = [];
+            for (const file of files) {
+                const key = file.name.toLowerCase();
+                photosMap[key] = await photoToDataURL(file);
+                keys.push(key);
+            }
+            syncPhotosWithStudents();
+            const withPhoto = students.filter(s => s.photo !== PLACEHOLDER_PHOTO).length;
+            const unmatched = keys.filter(k => !students.some(s => s.photo === photosMap[k])).length;
+            let msg = `${files.length} photo(s) added`;
+            if (students.length) msg += ` · ${withPhoto}/${students.length} students have a photo`;
+            if (unmatched && students.length) msg += ` · ${unmatched} unmatched (rename via “Edit / Rename Uploaded Photos”)`;
+            toast(msg, { label: 'Undo', fn: undo });
+        }
+
+        document.getElementById('photo-bulk-upload').addEventListener('change', function(e) {
+            handleBulkPhotoFiles(e.target.files);
+            e.target.value = '';
+        });
+
+        // --- Single-photo click-to-upload (used directly on a card) ---
+        function triggerSinglePhotoUpload(studentId) {
+            pendingPhotoStudentId = studentId;
+            document.getElementById('single-photo-input').click();
+        }
+
+        document.getElementById('single-photo-input').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file || pendingPhotoStudentId === null) return;
+            snapshot();
+            const dataUrl = await photoToDataURL(file);
+            const key = file.name.toLowerCase();
+            photosMap[key] = dataUrl;
+            const student = students.find(s => s.id === pendingPhotoStudentId);
+            if (student) {
+                student.photo = dataUrl;
+                student.photoFileName = key;
+            }
+            pendingPhotoStudentId = null;
+            e.target.value = '';
+            renderAllCards();
+            updatePhotoBadge();
+        });
+
+        function syncPhotosWithStudents() {
+            students.forEach(student => {
+                const p = matchPhoto(student);
+                if (p && (student.photo === PLACEHOLDER_PHOTO || student.photoFileName)) student.photo = p;
+            });
+            renderAllCards();
+            updatePhotoBadge();
+        }
+
+        // --- Camera Hardware Switching ---
+        async function populateCameraDevices() {
+            const cameraSelect = document.getElementById('camera-select');
+            cameraSelect.innerHTML = '';
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                devices.filter(d => d.kind === 'videoinput').forEach((device, index) => {
+                    const option = document.createElement('option');
+                    option.value = device.deviceId;
+                    option.text = device.label || `Camera ${index + 1}`;
+                    cameraSelect.appendChild(option);
+                });
+            } catch (err) {
+                console.error("Camera error", err);
+            }
+        }
+
+        async function startCameraStream(deviceId = null) {
+            const video = document.getElementById('webcam-stream');
+            if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+
+            const constraints = { video: deviceId ? { deviceId: { exact: deviceId } } : { facingMode: "environment" } };
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = mediaStream;
+                await populateCameraDevices();
+            } catch (err) {
+                alert('Camera stream error: ' + err.message);
+            }
+        }
+
+        async function toggleCamera() {
+            const container = document.getElementById('camera-container');
+            const btn = document.getElementById('toggle-cam-btn');
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+                container.classList.add('hidden');
+                btn.innerHTML = '📷 Open Camera Stream';
+            } else {
+                container.classList.remove('hidden');
+                btn.innerHTML = '⏹ Close Camera Stream';
+                await startCameraStream();
+            }
+        }
+
+        function switchCameraSource() {
+            startCameraStream(document.getElementById('camera-select').value);
+        }
+
+        // --- Integrated Fixed Camera Capture Function ---
+        function capturePhoto() {
+            if (!mediaStream) return;
+            const video = document.getElementById('webcam-stream');
+            const canvas = document.getElementById('snapshot-canvas');
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const inputLabel = document.getElementById('captured-photo-label').value.trim();
+            let photoKey = (inputLabel || `captured_${Date.now()}.jpg`).toLowerCase();
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            snapshot();
+
+            // 1. Store image in photos map
+            photosMap[photoKey] = imageDataUrl;
+
+            // 2. If students exist, automatically assign to the matching student,
+            //    OR assign to the first student without a photo.
+            if (students.length > 0) {
+                let targetStudent = students.find(s => s.photoFileName && s.photoFileName.toLowerCase() === photoKey);
+                
+                // If no filename match was found, assign it to the first student missing a photo
+                if (!targetStudent) {
+                    targetStudent = students.find(s => !s.photo || s.photo === PLACEHOLDER_PHOTO);
+                }
+
+                // If all students already have photos, assign to the very first student
+                if (!targetStudent) {
+                    targetStudent = students[0];
+                }
+
+                if (targetStudent) {
+                    targetStudent.photo = imageDataUrl;
+                    targetStudent.photoFileName = photoKey;
+                }
+            }
+
+            // 3. Sync, refresh list, and re-render the card grid
+            syncPhotosWithStudents();
+            renderAllCards();
+            updatePhotoBadge();
+            
+            toast(`Photo captured: ${photoKey}`);
+        }
+
+        function togglePhotoManager() {
+            const modal = document.getElementById('photo-manager-modal');
+            modal.classList.toggle('hidden');
+            if (!modal.classList.contains('hidden')) buildPhotoManagerList();
+        }
+
+        function updatePhotoBadge() {
+            document.getElementById('photo-count-badge').innerText = Object.keys(photosMap).length;
+        }
+
+        function buildPhotoManagerList() {
+            const list = document.getElementById('photo-manager-list');
+            list.innerHTML = Object.keys(photosMap).length === 0 ? '<p class="text-center text-xs text-slate-400 py-8">No photos loaded.</p>' : '';
+
+            Object.keys(photosMap).forEach((key) => {
+                list.innerHTML += `
+                    <div class="flex items-center gap-3 bg-slate-50 border p-2 rounded-xl">
+                        <img src="${photosMap[key]}" class="w-12 h-14 object-cover rounded border">
+                        <input type="text" value="${esc(key)}" data-old="${esc(key)}" onchange="renamePhotoKey(this.dataset.old, this.value)" class="flex-1 text-xs p-1 border rounded">
+                    </div>
+                `;
+            });
+        }
+
+        function renamePhotoKey(oldKey, newKey) {
+            newKey = newKey.trim().toLowerCase();
+            if (!newKey || oldKey === newKey) return;
+            snapshot();
+            photosMap[newKey] = photosMap[oldKey];
+            delete photosMap[oldKey];
+            syncPhotosWithStudents();
+        }
+
+        // --- Templates Upload (persistent data URLs so they survive reload/export/print) ---
+        document.getElementById('front-bg-upload').addEventListener('change', async e => { if (e.target.files[0]) { frontBgUrl = await fileToDataURL(e.target.files[0]); renderAllCards(); } });
+        document.getElementById('back-bg-upload').addEventListener('change', async e => { if (e.target.files[0]) { backBgUrl = await fileToDataURL(e.target.files[0]); renderAllCards(); } });
+        document.getElementById('sig-upload').addEventListener('change', async e => { if (e.target.files[0]) { signatureUrl = await fileToDataURL(e.target.files[0]); renderAllCards(); } });
+
+        function adjustPhoto(studentId, zoomDelta, xDelta, yDelta) {
+            const student = students.find(s => s.id === studentId);
+            if (student) {
+                snapshot('photo' + studentId);
+                student.zoom = Math.max(0.5, Math.min(3, student.zoom + zoomDelta));
+                student.offsetX += xDelta;
+                student.offsetY += yDelta;
+                renderAllCards();
+            }
+        }
+
+        function downloadSampleCSV() {
+            const csvContent = "data:text/csv;charset=utf-8,LastName,FirstName,MI,LRN,Birthday,Guardian,Contact,PhotoFileName,Grade,Section,Address,Sex,BloodType\nDela Cruz,Juan,A,123456789012,2010-05-21,Maria Dela Cruz,09171234567,juan.jpg,10,Newton,\"123 Rizal St., Brgy. Poblacion, Tupi, South Cotabato\",M,O+";
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI(csvContent));
+            link.setAttribute("download", "student_ids_template.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function confirmClearAllData() {
+            if (students.length === 0 && Object.keys(photosMap).length === 0) return;
+            if (confirm(`This will remove all ${students.length} student(s) and all loaded photos. Continue?\n(You can undo this with Ctrl+Z.)`)) {
+                snapshot();
+                clearAllData();
+                toast('All data cleared', { label: 'Undo', fn: undo });
+            }
+        }
+
+        function clearAllData() {
+            students = [];
+            photosMap = {};
+            renderAllCards();
+            updatePhotoBadge();
+        }
+
+        // --- Manual Roster Editing ---
+        function addBlankStudent() {
+            snapshot();
+            students.push({
+                id: nextId(),
+                firstName: 'First',
+                lastName: 'Last',
+                mi: '',
+                lrn: 'N/A',
+                Birthday: 'N/A',
+                guardian: 'Parent / Guardian',
+                contact: 'N/A',
+                grade: '',
+                section: '',
+                address: '',
+                sex: '',
+                bloodType: '',
+                photoFileName: '',
+                photo: PLACEHOLDER_PHOTO,
+                zoom: 1,
+                offsetX: 0,
+                offsetY: 0
+            });
+            renderAllCards();
+        }
+
+        function deleteStudent(id) {
+            const student = students.find(s => s.id === id);
+            if (!student) return;
+            snapshot();
+            students = students.filter(s => s.id !== id);
+            selectedIds.delete(id);
+            renderAllCards();
+            toast(`Removed ${student.firstName} ${student.lastName}`, { label: 'Undo', fn: undo });
+        }
+
+        function updateStudentField(id, field, value) {
+            const student = students.find(s => s.id === id);
+            if (!student) return;
+            snapshot('edit' + id + field);
+            student[field] = value;
+            renderAllCards({ skipRoster: true });
+        }
+
+        function sortStudents() {
+            const mode = document.getElementById('roster-sort').value;
+            if (mode) snapshot();
+            if (mode === 'last-asc') students.sort((a, b) => a.lastName.localeCompare(b.lastName));
+            else if (mode === 'last-desc') students.sort((a, b) => b.lastName.localeCompare(a.lastName));
+            else if (mode === 'lrn') students.sort((a, b) => String(a.lrn).localeCompare(String(b.lrn)));
+            renderAllCards();
+        }
+
+        function buildRosterTable() {
+            const tbody = document.getElementById('roster-table-body');
+            const search = (document.getElementById('roster-search').value || '').toLowerCase();
+            const mode = (document.getElementById('roster-filter') || {}).value || '';
+            const visible = students.filter(s => {
+                if (search && !`${s.firstName} ${s.lastName} ${s.lrn} ${s.grade} ${s.section} ${s.guardian}`.toLowerCase().includes(search)) return false;
+                if (mode === 'nophoto' && !(!s.photo || s.photo === PLACEHOLDER_PHOTO)) return false;
+                if (mode === 'issues' && !studentIssues(s).length) return false;
+                return true;
+            });
+            updateBulkBar();
+
+            if (students.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="15" class="text-center text-slate-400 py-6">No students loaded yet.</td></tr>`;
+                return;
+            }
+            if (visible.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="15" class="text-center text-slate-400 py-6">${search ? 'No matches for "' + esc(search) + '".' : 'No students match this filter.'}</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = visible.map(s => `
+                <tr class="border-t border-slate-100 hover:bg-slate-50">
+                    <td class="p-1"><input type="checkbox" ${selectedIds.has(s.id) ? 'checked' : ''} onchange="toggleSelect(${s.id}, this.checked)"></td>
+                    <td class="p-1">
+                        <img src="${s.photo}" onclick="triggerSinglePhotoUpload(${s.id})" title="Click to change photo" class="w-7 h-9 object-cover rounded cursor-pointer border ${s.photo === PLACEHOLDER_PHOTO ? 'border-red-400' : 'border-slate-300'}">
+                    </td>
+                    <td class="p-1"><input value="${esc(s.lastName)}" onchange="updateStudentField(${s.id}, 'lastName', this.value)" class="w-20 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.firstName)}" onchange="updateStudentField(${s.id}, 'firstName', this.value)" class="w-20 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.mi)}" onchange="updateStudentField(${s.id}, 'mi', this.value)" class="w-8 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.lrn)}" onchange="updateStudentField(${s.id}, 'lrn', this.value)" class="w-24 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.Birthday)}" onchange="updateStudentField(${s.id}, 'Birthday', this.value)" class="w-24 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.guardian)}" onchange="updateStudentField(${s.id}, 'guardian', this.value)" class="w-24 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.contact)}" onchange="updateStudentField(${s.id}, 'contact', this.value)" class="w-20 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.grade)}" onchange="updateStudentField(${s.id}, 'grade', this.value)" class="w-12 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.section)}" onchange="updateStudentField(${s.id}, 'section', this.value)" class="w-20 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.address)}" onchange="updateStudentField(${s.id}, 'address', this.value)" class="w-40 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.sex)}" onchange="updateStudentField(${s.id}, 'sex', this.value)" class="w-10 p-1 border rounded"></td>
+                    <td class="p-1"><input value="${esc(s.bloodType)}" onchange="updateStudentField(${s.id}, 'bloodType', this.value)" class="w-10 p-1 border rounded"></td>
+                    <td class="p-1 whitespace-nowrap">${studentIssues(s).length ? `<span class="text-amber-500" title="${esc(studentIssues(s).join(', '))}">⚠</span>` : ''}<button onclick="locateCard(${s.id})" title="Show this card in the preview" class="px-1">📍</button><button onclick="openExport(${s.id})" title="Print / download this ID" class="text-emerald-700 hover:text-emerald-900 font-bold px-1">⬇</button><button onclick="deleteStudent(${s.id})" class="text-red-600 hover:text-red-800 font-bold px-1">✕</button></td>
+                </tr>
+            `).join('');
+        }
+
+        function updateValidationSummary() {
+            const el = document.getElementById('validation-summary');
+            if (students.length === 0) { el.innerHTML = ''; return; }
+
+            const missingPhoto = students.filter(s => !s.photo || s.photo === PLACEHOLDER_PHOTO).length;
+
+            const lrnCounts = {};
+            students.forEach(s => {
+                const key = String(s.lrn || '').trim().toLowerCase();
+                if (key && key !== 'n/a') lrnCounts[key] = (lrnCounts[key] || 0) + 1;
+            });
+            const duplicateLrns = Object.values(lrnCounts).filter(c => c > 1).length;
+
+            const badLrn = students.filter(s => !/^\d{12}$/.test(String(s.lrn).trim())).length;
+            const noAddr = students.filter(s => !String(s.address || '').trim()).length;
+            const badges = [];
+            if (noAddr > 0) badges.push(`<span class="bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold">⚠ ${noAddr} missing address</span>`);
+            if (badLrn > 0) badges.push(`<span class="bg-orange-100 text-orange-700 px-2 py-1 rounded-full font-semibold">⚠ ${badLrn} LRN not 12 digits</span>`);
+            if (missingPhoto > 0) badges.push(`<span class="bg-red-100 text-red-700 px-2 py-1 rounded-full font-semibold">⚠ ${missingPhoto} missing photo${missingPhoto > 1 ? 's' : ''}</span>`);
+            if (duplicateLrns > 0) badges.push(`<span class="bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-semibold">⚠ ${duplicateLrns} duplicate LRN${duplicateLrns > 1 ? 's' : ''}</span>`);
+            if (badges.length === 0) badges.push(`<span class="bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full font-semibold">✓ All records look good</span>`);
+            el.innerHTML = badges.join('');
+        }
+
+        // --- Photo Drag Reposition & Scroll-to-Zoom (directly on the card) ---
+        function startPhotoDrag(e, studentId) {
+            e.preventDefault();
+            const img = e.currentTarget;
+            const student = students.find(s => s.id === studentId);
+            if (!student) return;
+            snapshot('photo' + studentId);
+            const startX = e.clientX, startY = e.clientY;
+            const origX = student.offsetX, origY = student.offsetY;
+            try { img.setPointerCapture(e.pointerId); } catch (err) {}
+
+            function onMove(ev) {
+                const z = (previewZoom || 100) / 100;
+                student.offsetX = origX + (ev.clientX - startX) / z;
+                student.offsetY = origY + (ev.clientY - startY) / z;
+                img.style.transform = `scale(${student.zoom}) translate(${student.offsetX}px, ${student.offsetY}px)`;
+            }
+            function onUp() {
+                img.removeEventListener('pointermove', onMove);
+                img.removeEventListener('pointerup', onUp);
+                renderAllCards();
+            }
+            img.addEventListener('pointermove', onMove);
+            img.addEventListener('pointerup', onUp);
+        }
+
+        function zoomPhotoWheel(e, studentId) {
+            e.preventDefault();
+            const student = students.find(s => s.id === studentId);
+            if (!student) return;
+            snapshot('photo' + studentId);
+            student.zoom = Math.max(0.5, Math.min(3, student.zoom + (e.deltaY > 0 ? -0.05 : 0.05)));
+            renderAllCards();
+        }
+
+        // --- Save / Load Project (persists everything, including photos, as JSON) ---
+        function exportProject() {
+            const project = {
+                students, photosMap, frontBgUrl, backBgUrl, signatureUrl, logoUrl,
+                schoolName: document.getElementById('school-name').value,
+                principalName: document.getElementById('principal-name').value,
+                fontFamily: document.getElementById('font-family-select').value,
+                barcode: getBcSettings(), extras: getExtras()
+            };
+            const blob = new Blob([JSON.stringify(project)], { type: 'application/json' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `student_id_project_${new Date().toISOString().slice(0,10)}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function loadProjectData(project) {
+            snapshot();
+            students = project.students || [];
+            photosMap = project.photosMap || {};
+            frontBgUrl = project.frontBgUrl || '';
+            backBgUrl = project.backBgUrl || '';
+            signatureUrl = project.signatureUrl || '';
+            logoUrl = project.logoUrl || '';
+            if (project.schoolName) document.getElementById('school-name').value = project.schoolName;
+            if (project.principalName) document.getElementById('principal-name').value = project.principalName;
+            if (project.fontFamily) document.getElementById('font-family-select').value = project.fontFamily;
+            if (project.barcode) setBcSettings(project.barcode);
+            if (project.extras) setExtras(project.extras);
+            renderAllCards();
+            updatePhotoBadge();
+        }
+
+        document.getElementById('project-import-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = evt => {
+                try {
+                    const project = JSON.parse(evt.target.result);
+                    loadProjectData(project);
+                } catch (err) {
+                    alert('Could not read this project file: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+            e.target.value = '';
+        });
+
+        // --- Autosave to localStorage so a refresh doesn't wipe the roster ---
+        let autosaveTimer = null;
+        function autosaveProject() {
+            clearTimeout(autosaveTimer);
+            autosaveTimer = setTimeout(() => {
+                try {
+                    const project = {
+                        students, photosMap, frontBgUrl, backBgUrl, signatureUrl, logoUrl,
+                        schoolName: document.getElementById('school-name').value,
+                        principalName: document.getElementById('principal-name').value,
+                        fontFamily: document.getElementById('font-family-select').value,
+                barcode: getBcSettings(), extras: getExtras()
+                    };
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+                    const indicator = document.getElementById('autosave-indicator');
+                    if (indicator) {
+                        indicator.innerText = 'Autosaved ' + new Date().toLocaleTimeString();
+                    }
+                } catch (err) {
+                    console.warn('Autosave skipped:', err.message);
+                    const ind = document.getElementById('autosave-indicator');
+                    if (ind) ind.innerText = '⚠ Autosave full - use Save Project';
+                }
+            }, 600);
+        }
+
+        function tryRestoreAutosave() {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return false;
+            try {
+                const project = JSON.parse(raw);
+                if (project.students && project.students.length > 0) {
+                    if (confirm(`Restore your last session (${project.students.length} student(s))?`)) {
+                        loadProjectData(project);
+                        return true;
+                    }
+                }
+            } catch (err) {
+                console.warn('Autosave restore failed:', err.message);
+            }
+            return false;
+        }
+
+        // --- Card Generator Engines ---
+        function sizeVal(id, def) { const v = parseFloat(document.getElementById(id)?.value); return isFinite(v) && v > 0 ? v : def; }
+
+        function buildFrontCardHtml(student, schoolName, styles) {
+            return `
+                <div data-sid="${student.id}" class="id-card-portrait card-edge flex flex-col justify-between p-2">
+                    ${frontBgUrl ? `<img src="${frontBgUrl}" class="absolute inset-0 w-full h-full object-fill pointer-events-none z-0">` : accentBars()}
+                    
+                    <div class="relative z-10 flex flex-col justify-between h-full">
+                        <!-- Header -->
+                        <div class="text-center pb-1" style="transform: translateY(${styles.headerOffsetY}px);">
+                            ${logoUrl ? `<img src="${logoUrl}" style="height:${document.getElementById('logo-height').value}mm;margin:0 auto 0.5mm;object-fit:contain;display:block">` : ''}
+                            <p style="font-size: ${styles.headerFontSize}px; color: ${styles.headerColor};" class="font-extrabold uppercase leading-tight">${esc(schoolName)}</p>
+                        </div>
+
+                        <!-- Photo (drag to reposition, scroll to zoom, click to upload) -->
+                        <div class="flex flex-col items-center my-1">
+                            <div style="width:${sizeVal('photo-w',28)}mm;height:${sizeVal('photo-h',34)}mm;flex-shrink:0" class="relative border-2 ${student.photo === PLACEHOLDER_PHOTO ? 'border-red-400 missing-photo-flag' : 'border-slate-800'} rounded-lg overflow-hidden bg-slate-100">
+                                <img src="${student.photo}" alt="photo" onpointerdown="startPhotoDrag(event, ${student.id})" onwheel="zoomPhotoWheel(event, ${student.id})" style="transform: scale(${student.zoom}) translate(${student.offsetX}px, ${student.offsetY}px); cursor: grab; touch-action: none;" class="w-full h-full object-cover">
+                            </div>
+                        </div>
+
+                        <!-- Name Block -->
+                        <div class="text-center space-y-1" style="transform: translateY(${styles.nameOffsetY}px);">
+                            <p style="font-size: ${styles.nameFontSize}px; color: ${styles.nameColor};" class="${styles.nameBold} ${styles.nameItalic} leading-tight uppercase">
+                                ${esc(student.lastName)}<br>
+                                <span>${esc(student.firstName)} ${student.mi ? esc(student.mi) + '.' : ''}</span>
+                            </p>
+                        </div>
+
+                        <!-- LRN & Birthday Block -->
+                        <div class="border border-slate-200 py-1 px-1 rounded space-y-0.5 text-center" style="background:rgba(255,255,255,.8);transform: translateY(${styles.metaOffsetY}px);">
+                            <p style="font-size: ${styles.metaFontSize}px; color: ${styles.metaColor};" class="${styles.metaBold} leading-none">LRN: ${esc(student.lrn)}</p>
+                            <p style="font-size: ${styles.metaFontSize}px; color: ${styles.metaColor};" class="${styles.metaBold} leading-none">Birthday: ${esc(student.Birthday)}</p>
+                            ${studentExtraLines(student, styles)}
+                        </div>
+                    </div>
+
+                    <!-- Floating photo tools: absolutely positioned, hidden on print/export, take no layout space -->
+                    <div class="card-tools no-print">
+                        <button onclick="triggerSinglePhotoUpload(${student.id})" class="bg-blue-700" title="Upload photo for this student">📤</button>
+                        <button onclick="openExport(${student.id})" class="bg-emerald-700" title="Print / download this ID">⬇</button>
+                        <div class="grp">
+                            <button onclick="adjustPhoto(${student.id}, 0.1, 0, 0)" class="bg-slate-700" title="Zoom in">+</button>
+                            <button onclick="adjustPhoto(${student.id}, -0.1, 0, 0)" class="bg-slate-700" title="Zoom out">−</button>
+                            <button onclick="adjustPhoto(${student.id}, 0, -2, 0)" class="bg-slate-700">↑</button>
+                            <button onclick="adjustPhoto(${student.id}, 0, 2, 0)" class="bg-slate-700">↓</button>
+                            <button onclick="adjustPhoto(${student.id}, 0, 0, -2)" class="bg-slate-700">←</button>
+                            <button onclick="adjustPhoto(${student.id}, 0, 0, 2)" class="bg-slate-700">→</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function buildBackCardHtml(student, principalName) {
+            return `
+                <div data-sid="${student.id}" class="id-card-portrait card-edge flex flex-col justify-between p-2">
+                    ${backBgUrl ? `<img src="${backBgUrl}" class="absolute inset-0 w-full h-full object-fill pointer-events-none z-0">` : accentBars()}
+                    ${qrBlock(student)}
+                    
+                    <div class="relative z-10 flex flex-col justify-between h-full">
+                        <div>
+                            <p class="text-[7px] font-bold text-center text-red-600 uppercase mb-1">In Case of Emergency</p>
+                            <div class="border p-1.5 rounded space-y-1 text-center" style="background:rgba(255,255,255,.8)">
+                                <p class="text-[7px] font-bold text-slate-800">Guardian: ${esc(student.guardian)}</p>
+                                <p class="text-[7px] font-bold text-blue-800">Contact: ${esc(student.contact)}</p>
+                            </div>
+                            <div class="border p-1 rounded text-center" style="margin-top:1mm;background:rgba(255,255,255,.8)">
+                                ${learnerInfoHtml(student)}
+                            </div>
+                        </div>
+
+                        <p class="text-[5.5px] text-slate-500 text-center leading-tight px-1">
+                            This card serves as official institutional identification and must be presented upon entering campus grounds.
+                        </p>
+
+                        <div class="text-center relative" style="padding-top:${Math.round(sizeVal('sig-h',24) * 2 / 3)}px">
+                            ${signatureUrl ? `<img src="${signatureUrl}" style="height:${sizeVal('sig-h',24)}px" class="mx-auto absolute inset-x-0 top-0 object-contain z-10">` : ''}
+                            <p style="font-size:${sizeVal('prin-name-px',7)}px" class="font-bold uppercase border-t border-slate-800 pt-0.5 inline-block w-full">${esc(principalName)}</p>
+                            <p style="font-size:${sizeVal('prin-title-px',5.5)}px" class="text-slate-500 uppercase block">School Principal</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function readStyles() {
+    return {
+                nameFontSize: document.getElementById('name-font-size').value,
+                nameColor: document.getElementById('name-color').value,
+                nameOffsetY: document.getElementById('name-offset-y').value,
+                nameBold: document.getElementById('name-bold').checked ? 'font-bold' : 'font-normal',
+                nameItalic: document.getElementById('name-italic').checked ? 'italic' : 'not-italic',
+
+                metaFontSize: document.getElementById('meta-font-size').value,
+                metaColor: document.getElementById('meta-color').value,
+                metaOffsetY: document.getElementById('meta-offset-y').value,
+                metaBold: document.getElementById('meta-bold').checked ? 'font-bold' : 'font-normal',
+
+                headerFontSize: document.getElementById('header-font-size').value,
+                headerColor: document.getElementById('header-color').value,
+                headerOffsetY: document.getElementById('header-offset-y').value
+            };
+        }
+
+        function renderAllCards(opts = {}) {
+            const printArea = document.getElementById('print-area');
+            const schoolName = document.getElementById('school-name').value;
+            const principalName = document.getElementById('principal-name').value;
+            const fontFamily = document.getElementById('font-family-select').value;
+
+            const styles = readStyles();
+
+            document.getElementById('student-count').innerText = `${students.length} Student Cards`;
+            printArea.innerHTML = '';
+
+            if (!opts.skipRoster) buildRosterTable();
+            updateValidationSummary();
+            updateQrInfo();
+            updateChecklist();
+            autosaveProject();
+
+            if (students.length === 0) {
+                printArea.innerHTML = `<div class="a4-page flex items-center justify-center font-sans-custom"><div class="text-center"><p class="text-slate-500 font-bold text-sm">No ID cards yet</p><p class="text-slate-400 text-xs mt-1">Import a CSV / Excel file or use “Add Student” in the roster.</p></div></div>`;
+                return;
+            }
+
+            const duplexMirror = document.getElementById('duplex-mirror') ? document.getElementById('duplex-mirror').checked : true;
+            const printSides = printSidesOverride || (document.getElementById('print-sides') ? document.getElementById('print-sides').value : 'both');
+            const list = printList || students;
+            const CARDS_PER_PAGE = 9;
+
+            // Reverses each row of 3 so that when a sheet is flipped on its long edge for
+            // duplex printing, each card's back lands directly behind its own front.
+            function mirrorRowsOfThree(list) {
+                const mirrored = [];
+                for (let r = 0; r < list.length; r += 3) {
+                    const row = list.slice(r, r + 3);
+                    while (row.length < 3) row.push(null);   // keep partial rows aligned to the correct column
+                    mirrored.push(...row.reverse());
+                }
+                return mirrored;
+            }
+
+            for (let i = 0; i < list.length; i += CARDS_PER_PAGE) {
+                const chunk = list.slice(i, i + CARDS_PER_PAGE);
+
+                const sheetNo = Math.floor(i / CARDS_PER_PAGE) + 1;
+                const pageLabel = t => { const d = document.createElement('div'); d.className = 'no-print page-label'; d.textContent = t; return d; };
+                if (printSides !== 'back') {
+                    printArea.appendChild(pageLabel(`Sheet ${sheetNo} · Front`));
+                    const frontPage = document.createElement('div');
+                    frontPage.className = `a4-page ${fontFamily} ${document.getElementById('cut-guides').checked ? 'guides' : ''}`;
+                    frontPage.innerHTML = chunk.map(student => buildFrontCardHtml(student, schoolName, styles)).join('');
+                    printArea.appendChild(frontPage);
+                }
+
+                if (printSides !== 'front') {
+                    printArea.appendChild(pageLabel(`Sheet ${sheetNo} · Back${duplexMirror ? ' (mirrored for duplex)' : ''}`));
+                    const backOrder = duplexMirror ? mirrorRowsOfThree(chunk) : chunk;
+                    const backPage = document.createElement('div');
+                    backPage.className = `a4-page ${fontFamily} ${document.getElementById('cut-guides').checked ? 'guides' : ''}`;
+                    backPage.innerHTML = backOrder.map(student => student ? buildBackCardHtml(student, principalName) : '<div></div>').join('');
+                    printArea.appendChild(backPage);
+                }
+            }
+        }
+
+        // =====================================================================
+        // Helpers
+        // =====================================================================
+        function esc(v) {
+            return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function toast(msg, action) {
+            const t = document.getElementById('toast');
+            t.innerHTML = `<div class="toast-pill"><span>${esc(msg)}</span>${action ? `<button type="button" id="toast-act">${esc(action.label)}</button>` : ''}</div>`;
+            if (action) document.getElementById('toast-act').onclick = () => { t.innerHTML = ''; action.fn(); };
+            clearTimeout(toast._t);
+            toast._t = setTimeout(() => t.innerHTML = '', action ? 7000 : 3000);
+        }
+
+        // =====================================================================
+        // QR code (learner info)
+        // =====================================================================
+        const QR_FIELDS = [['lrn', 'LRN', 1], ['name', 'Full name', 1], ['bday', 'Birthday', 1], ['sex', 'Sex', 1], ['address', 'Address', 1],
+                           ['grade', 'Grade & section', 1], ['guardian', 'Guardian', 1], ['contact', 'Contact no.', 1], ['blood', 'Blood type', 0]];
+        document.getElementById('qr-fields').innerHTML = QR_FIELDS.map(f =>
+            `<label class="flex items-center gap-1"><input type="checkbox" data-qrf="${f[0]}" ${f[2] ? 'checked' : ''} onchange="renderAllCards({skipRoster:true})"> ${f[1]}</label>`).join('');
+        if (typeof qrcode !== 'undefined' && qrcode.stringToBytesFuncs && qrcode.stringToBytesFuncs['UTF-8']) {
+            qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];   // names/addresses with ñ etc.
+        }
+
+        function qrFieldsOn() { return [...document.querySelectorAll('[data-qrf]')].filter(c => c.checked).map(c => c.dataset.qrf); }
+
+        function validLrn(s) {
+            const v = String(s.lrn || '').trim();
+            return v && v.toLowerCase() !== 'n/a' ? v : null;
+        }
+
+        function qrPayload(s) {
+            const on = qrFieldsOn();
+            if (!on.length) return '';
+            if (on.length === 1 && on[0] === 'lrn') return validLrn(s) || '';
+            const g = String(s.grade || '').trim(), sec = String(s.section || '').trim();
+            const map = {
+                lrn: ['LRN', validLrn(s)],
+                name: ['Name', `${s.lastName}, ${s.firstName}${s.mi ? ' ' + s.mi + '.' : ''}`],
+                bday: ['Birthday', s.Birthday && s.Birthday !== 'N/A' ? s.Birthday : ''],
+                sex: ['Sex', s.sex],
+                address: ['Address', s.address],
+                grade: ['Grade/Section', [g && (/^\d+$/.test(g) ? 'Grade ' + g : g), sec].filter(Boolean).join(' - ')],
+                guardian: ['Guardian', s.guardian && s.guardian !== 'Parent / Guardian' ? s.guardian : ''],
+                contact: ['Contact', s.contact && s.contact !== 'N/A' ? s.contact : ''],
+                blood: ['Blood Type', s.bloodType]
+            };
+            return on.map(k => map[k]).filter(p => p && String(p[1] || '').trim()).map(p => `${p[0]}: ${String(p[1]).trim()}`).join('\n');
+        }
+
+        // Returns { svg, modules } or null (library missing / too much data)
+        function qrSvg(text, ec, color, sizeMm) {
+            if (typeof qrcode === 'undefined' || !text) return null;
+            try {
+                const qr = qrcode(0, ec);
+                qr.addData(text);
+                qr.make();
+                const n = qr.getModuleCount(), q = 2;
+                let d = '';
+                for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + q} ${r + q}h1v1h-1z`;
+                const t = n + q * 2;
+                return { modules: t, svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${t} ${t}" shape-rendering="crispEdges" width="${sizeMm}mm" height="${sizeMm}mm" style="display:block;width:${sizeMm}mm;height:${sizeMm}mm"><path d="${d}" fill="${color}"/></svg>` };
+            } catch (err) {
+                return null;
+            }
+        }
+
+        function bcVal(id) { return document.getElementById(id).value; }
+
+        function qrBlock(student) {
+            if (!document.getElementById('qr-on').checked) return '';
+            const res = qrSvg(qrPayload(student), bcVal('qr-ec'), bcVal('qr-color'), +bcVal('qr-size'));
+            if (!res) return '';
+            const white = document.getElementById('qr-white').checked;
+            const lrn = validLrn(student);
+            const showText = document.getElementById('qr-text').checked && lrn;
+            return `<div style="position:absolute;left:50%;top:calc(50% + ${+bcVal('qr-y')}mm);transform:translate(-50%,-50%);z-index:20;text-align:center;padding:0.3mm;${white ? 'background:#fff;' : ''}">
+                ${res.svg}
+                ${showText ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:${bcVal('qr-textsize')}px;line-height:1.1;color:${bcVal('qr-color')};letter-spacing:0.5px">${esc(lrn)}</div>` : ''}
+            </div>`;
+        }
+
+        function learnerInfoHtml(s) {
+            const extra = [s.sex && 'Sex: ' + s.sex, s.bloodType && 'Blood Type: ' + s.bloodType].filter(Boolean).join('  |  ');
+            return `<p class="text-[6.5px] font-bold text-slate-800 leading-tight">Address: ${esc(String(s.address || '').trim() || 'N/A')}</p>` +
+                   (extra ? `<p class="text-[6.5px] font-bold text-slate-800 leading-tight">${esc(extra)}</p>` : '');
+        }
+
+        function bcLabel(el) {
+            const out = document.getElementById(el.id + '-val');
+            if (out) out.textContent = el.value;
+        }
+
+        function updateQrInfo() {
+            const info = document.getElementById('bc-info');
+            if (!info) return;
+            if (typeof qrcode === 'undefined') { info.className = 'text-[11px] font-semibold text-red-600'; info.textContent = 'QR library failed to load (check internet connection).'; return; }
+            const sample = students.map(qrPayload).sort((a, b) => b.length - a.length)[0] || 'Name: Sample\nAddress: Sample';
+            const res = qrSvg(sample, bcVal('qr-ec'), '#000', +bcVal('qr-size'));
+            if (!res) { info.className = 'text-[11px] font-semibold text-red-600'; info.textContent = 'Too much data for one QR code. Untick some fields.'; return; }
+            const side = res.modules - 4, mm = (+bcVal('qr-size')) / res.modules;
+            const ok = mm >= 0.35, warn = mm >= 0.25;
+            info.className = 'text-[11px] font-semibold ' + (ok ? 'text-emerald-700' : warn ? 'text-amber-600' : 'text-red-600');
+            info.textContent = `Longest data: ${sample.length} chars, ${side}×${side} modules, ${mm.toFixed(2)} mm per dot — ` +
+                (ok ? 'scans easily ✓' : warn ? 'may be hard to scan; enlarge the QR or untick fields' : 'too dense to scan reliably; enlarge the QR or untick fields');
+        }
+
+        function getBcSettings() {
+            const o = { fields: qrFieldsOn() };
+            ['qr-size', 'qr-y', 'qr-textsize', 'qr-color', 'qr-ec'].forEach(id => o[id] = bcVal(id));
+            ['qr-on', 'qr-text', 'qr-white'].forEach(id => o[id] = document.getElementById(id).checked);
+            return o;
+        }
+
+        function setBcSettings(o) {
+            Object.keys(o || {}).forEach(id => {
+                if (id === 'fields') { document.querySelectorAll('[data-qrf]').forEach(c => c.checked = o.fields.includes(c.dataset.qrf)); return; }
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (el.type === 'checkbox') el.checked = !!o[id]; else el.value = o[id];
+                bcLabel(el);
+            });
+        }
+
+        // =====================================================================
+        // Selection (roster checkboxes)
+        // =====================================================================
+        const selectedIds = new Set();
+        function toggleSelect(id, on) { on ? selectedIds.add(id) : selectedIds.delete(id); updateBulkBar(); }
+        function toggleSelectAll(on) {
+            selectedIds.clear();
+            if (on) students.forEach(s => selectedIds.add(s.id));
+            buildRosterTable();
+        }
+        function clearSelection() {
+            selectedIds.clear();
+            const sa = document.getElementById('select-all'); if (sa) sa.checked = false;
+            buildRosterTable();
+        }
+        function pickedStudents() { return students.filter(s => selectedIds.has(s.id)); }
+        function updateBulkBar() {
+            const bar = document.getElementById('bulk-bar');
+            if (!bar) return;
+            const n = pickedStudents().length;
+            bar.classList.toggle('hidden', n === 0);
+            document.getElementById('bulk-count').textContent = `${n} selected`;
+        }
+        function bulkSetGradeSection() {
+            const list = pickedStudents();
+            if (!list.length) return;
+            const g = prompt(`Grade for ${list.length} student(s)? (leave empty to keep as is)`, '');
+            if (g === null) return;
+            const sec = prompt('Section? (leave empty to keep as is)', '');
+            if (sec === null) return;
+            snapshot();
+            list.forEach(s => { if (g.trim()) s.grade = g.trim(); if (sec.trim()) s.section = sec.trim(); });
+            renderAllCards();
+            toast(`Updated ${list.length} student(s)`, { label: 'Undo', fn: undo });
+        }
+        function bulkDelete() {
+            const list = pickedStudents();
+            if (!list.length) return;
+            if (!confirm(`Delete ${list.length} selected student(s)? You can undo this.`)) return;
+            snapshot();
+            const ids = new Set(list.map(s => s.id));
+            students = students.filter(s => !ids.has(s.id));
+            selectedIds.clear();
+            renderAllCards();
+            toast(`Deleted ${list.length} student(s)`, { label: 'Undo', fn: undo });
+        }
+        function studentIssues(s) {
+            const out = [];
+            if (!s.photo || s.photo === PLACEHOLDER_PHOTO) out.push('no photo');
+            if (!/^\d{12}$/.test(String(s.lrn).trim())) out.push('LRN not 12 digits');
+            if (!String(s.address || '').trim()) out.push('no address');
+            return out;
+        }
+        function locateCard(id) {
+            const el = document.querySelector(`#print-area .id-card-portrait[data-sid="${id}"]`);
+            if (!el) { toast('That card is not in the current preview.'); return; }
+            el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+            el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+        }
+
+        // =====================================================================
+        // Print / PNG / JPG export
+        // =====================================================================
+        let printList = null, printSidesOverride = null, exportOnlyId = null, exportedOnce = false;
+
+        function openExport(onlyId = null) {
+            if (students.length === 0) { toast('Add or import students first.'); return; }
+            exportOnlyId = onlyId;
+            const sel = document.getElementById('exp-scope');
+            const opts = [];
+            if (onlyId !== null) {
+                const s = students.find(x => x.id === onlyId);
+                opts.push(`<option value="one">Only: ${esc(s.lastName)}, ${esc(s.firstName)}</option>`);
+            }
+            const pickedCount = [...selectedIds].filter(id => students.some(s => s.id === id)).length;
+            if (pickedCount) opts.push(`<option value="selected">Selected students (${pickedCount})</option>`);
+            opts.push(`<option value="all">All students (${students.length})</option>`);
+            sel.innerHTML = opts.join('');
+            document.getElementById('exp-progress').textContent = '';
+            document.getElementById('exp-go').disabled = false;
+            document.getElementById('export-modal').classList.remove('hidden');
+            updateExportInfo();
+        }
+
+        function closeExport() { document.getElementById('export-modal').classList.add('hidden'); }
+
+        function exportTargets() {
+            const scope = document.getElementById('exp-scope').value;
+            if (scope === 'one') return students.filter(s => s.id === exportOnlyId);
+            if (scope === 'selected') return students.filter(s => selectedIds.has(s.id));
+            return students.slice();
+        }
+
+        function updateExportInfo() {
+            const fmt = document.getElementById('exp-format').value;
+            const n = exportTargets().length;
+            document.getElementById('exp-image-opts').classList.toggle('hidden', fmt === 'print');
+            document.getElementById('exp-q-wrap').classList.toggle('hidden', fmt !== 'jpg');
+            document.getElementById('exp-go').textContent = fmt === 'print' ? '🖨️ Print' : '⬇ Download';
+            document.getElementById('exp-info').textContent = fmt === 'print'
+                ? `${n} student(s) will be laid out on A4 sheets at actual size (54 × 86 mm). In the print dialog choose Scale 100% (not “Fit to page”) and Margins: None, so the sheet prints at the same size as the preview.`
+                : (n === 1 ? 'One image per side will be downloaded.' : `${n} student(s): all images will be bundled into one ZIP file, named LastName_FirstName_LRN_front/back.`);
+        }
+
+        async function runExport() {
+            const list = exportTargets();
+            if (!list.length) { toast('No students selected.'); return; }
+            const fmt = document.getElementById('exp-format').value;
+            const sides = document.getElementById('exp-sides').value;
+            const noPhoto = list.filter(s => !s.photo || s.photo === PLACEHOLDER_PHOTO).length;
+            if (noPhoto && !confirm(`${noPhoto} of ${list.length} ID(s) have no photo yet. Continue anyway?`)) return;
+            exportedOnce = true;
+            if (fmt === 'print') {
+                closeExport();
+                printList = list;
+                printSidesOverride = sides;
+                renderAllCards({ skipRoster: true });
+                setTimeout(() => window.print(), 200);
+                return;
+            }
+            await exportImages(list, fmt, sides, +document.getElementById('exp-dpi').value, +document.getElementById('exp-quality').value);
+        }
+
+        window.addEventListener('afterprint', () => {
+            if (printList) { printList = null; printSidesOverride = null; renderAllCards({ skipRoster: true }); }
+        });
+
+        function safeName(s) { return String(s).replace(/[^\w\-]+/g, '_').replace(/^_+|_+$/g, '') || 'x'; }
+
+        async function renderCardToBlob(html, scale, mime, quality) {
+            const host = document.createElement('div');
+            host.className = 'export-host ' + document.getElementById('font-family-select').value;
+            host.style.cssText = 'position:fixed;left:-9999px;top:0;';
+            // exported image is a clean rectangle: no border, shadow or rounded corners
+            host.innerHTML = html.replace('card-edge', '');
+            document.body.appendChild(host);
+            try {
+                await Promise.all([...host.querySelectorAll('img')].map(i => i.complete ? null : new Promise(r => { i.onload = i.onerror = r; })));
+                const canvas = await html2canvas(host.firstElementChild, { scale, backgroundColor: '#ffffff', logging: false, useCORS: true });
+                return await new Promise(res => canvas.toBlob(res, mime, quality));
+            } finally {
+                host.remove();
+            }
+        }
+
+        function downloadBlob(blob, name) {
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        }
+
+        async function exportImages(list, fmt, sides, dpi, quality) {
+            if (typeof html2canvas === 'undefined') { toast('Image library failed to load (check internet connection).'); return; }
+            const ext = fmt === 'png' ? 'png' : 'jpg';
+            const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
+            const scale = dpi / 96;
+            const schoolName = document.getElementById('school-name').value;
+            const principalName = document.getElementById('principal-name').value;
+            const styles = readStyles();
+            const progress = document.getElementById('exp-progress');
+            const goBtn = document.getElementById('exp-go');
+            goBtn.disabled = true;
+
+            const jobs = [];
+            list.forEach(s => {
+                const base = `${safeName(s.lastName)}_${safeName(s.firstName)}_${safeName(s.lrn)}`;
+                if (sides !== 'back') jobs.push({ name: `${base}_front.${ext}`, html: buildFrontCardHtml(s, schoolName, styles) });
+                if (sides !== 'front') jobs.push({ name: `${base}_back.${ext}`, html: buildBackCardHtml(s, principalName) });
+            });
+
+            try {
+                const files = [];
+                for (let i = 0; i < jobs.length; i++) {
+                    progress.textContent = `Rendering ${i + 1} of ${jobs.length}…`;
+                    files.push({ name: jobs[i].name, blob: await renderCardToBlob(jobs[i].html, scale, mime, quality) });
+                    await new Promise(r => setTimeout(r, 0)); // let the UI breathe
+                }
+                if (files.length === 1) {
+                    downloadBlob(files[0].blob, files[0].name);
+                } else if (typeof JSZip !== 'undefined') {
+                    progress.textContent = 'Creating ZIP…';
+                    const zip = new JSZip();
+                    files.forEach(f => zip.file(f.name, f.blob));
+                    downloadBlob(await zip.generateAsync({ type: 'blob' }), `student_ids_${ext}_${new Date().toISOString().slice(0, 10)}.zip`);
+                } else {
+                    files.forEach((f, i) => setTimeout(() => downloadBlob(f.blob, f.name), i * 300));
+                }
+                toast(`Downloaded ${files.length} image(s).`);
+                closeExport();
+            } catch (err) {
+                console.error(err);
+                progress.textContent = 'Export failed: ' + err.message;
+            } finally {
+                goBtn.disabled = false;
+            }
+        }
+
+        // =====================================================================
+        // Branding, extra card lines, photo matching, CSV export
+        // =====================================================================
+        let logoUrl = '';
+        document.getElementById('logo-upload').addEventListener('change', async e => {
+            if (e.target.files[0]) { logoUrl = await fileToDataURL(e.target.files[0]); renderAllCards({ skipRoster: true }); }
+        });
+        function clearLogo() { logoUrl = ''; document.getElementById('logo-upload').value = ''; renderAllCards({ skipRoster: true }); }
+
+        function accentBars() {
+            const c = document.getElementById('accent-color').value;
+            return `<div style="position:absolute;left:0;right:0;top:0;height:1.6mm;background:${c};z-index:0"></div>
+                    <div style="position:absolute;left:0;right:0;bottom:0;height:2.2mm;background:${c};z-index:0"></div>`;
+        }
+
+        function studentExtraLines(student, styles) {
+            const g = String(student.grade || '').trim(), sec = String(student.section || '').trim();
+            const line = [g && (/^\d+$/.test(g) ? 'Grade ' + g : g), sec].filter(Boolean).join(' - ');
+            const sy = document.getElementById('school-year').value.trim();
+            const px = Math.max(5, (+styles.metaFontSize) - 1);
+            return (line ? `<p style="font-size:${styles.metaFontSize}px;color:${styles.metaColor};" class="${styles.metaBold} leading-none">${esc(line)}</p>` : '')
+                 + (sy ? `<p style="font-size:${px}px;color:${styles.metaColor};" class="leading-none">${esc(sy)}</p>` : '');
+        }
+
+        function getExtras() {
+            return { schoolYear: document.getElementById('school-year').value, accent: document.getElementById('accent-color').value,
+                     all: collectSettings(),
+                     logoH: document.getElementById('logo-height').value, guides: document.getElementById('cut-guides').checked,
+                     photoW: document.getElementById('photo-w').value, photoH: document.getElementById('photo-h').value,
+                     prinNamePx: document.getElementById('prin-name-px').value, prinTitlePx: document.getElementById('prin-title-px').value,
+                     sigH: document.getElementById('sig-h').value };
+        }
+        function setExtras(o) {
+            if (o.schoolYear !== undefined) document.getElementById('school-year').value = o.schoolYear;
+            if (o.accent) document.getElementById('accent-color').value = o.accent;
+            if (o.logoH) document.getElementById('logo-height').value = o.logoH;
+            if (o.guides !== undefined) document.getElementById('cut-guides').checked = o.guides;
+            if (o.photoW) document.getElementById('photo-w').value = o.photoW;
+            if (o.photoH) document.getElementById('photo-h').value = o.photoH;
+            if (o.prinNamePx) document.getElementById('prin-name-px').value = o.prinNamePx;
+            if (o.prinTitlePx) document.getElementById('prin-title-px').value = o.prinTitlePx;
+            if (o.sigH) document.getElementById('sig-h').value = o.sigH;
+            if (o.all) applySettings(o.all);
+        }
+
+        // A photo matches a student by: the PhotoFileName column, the LRN, or "Last_First" / "First_Last" (extension ignored).
+        function matchPhoto(s) {
+            const norm = t => String(t || '').toLowerCase().replace(/\.[^.]+$/, '').replace(/[\s_\-,]+/g, '');
+            const targets = new Set([norm(s.photoFileName), norm(s.lrn), norm(s.lastName + s.firstName), norm(s.firstName + s.lastName)]);
+            targets.delete('');
+            targets.delete('na');
+            if (s.photoFileName && photosMap[String(s.photoFileName).toLowerCase()]) return photosMap[String(s.photoFileName).toLowerCase()];
+            for (const key of Object.keys(photosMap)) {
+                if (targets.has(norm(key))) return photosMap[key];
+            }
+            return null;
+        }
+
+        function exportRosterCSV() {
+            if (!students.length) { toast('No students to export.'); return; }
+            const cols = [['LastName', 'lastName'], ['FirstName', 'firstName'], ['MI', 'mi'], ['LRN', 'lrn'], ['Birthday', 'Birthday'],
+                          ['Guardian', 'guardian'], ['Contact', 'contact'], ['Grade', 'grade'], ['Section', 'section'], ['Address', 'address'], ['Sex', 'sex'], ['BloodType', 'bloodType'], ['PhotoFileName', 'photoFileName']];
+            const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+            const rows = [cols.map(c => c[0]).join(',')].concat(students.map(s => cols.map(c => q(s[c[1]])).join(',')));
+            downloadBlob(new Blob(['\ufeff' + rows.join('\r\n')], { type: 'text/csv;charset=utf-8' }), 'student_roster.csv');
+        }
+
+
+        // =====================================================================
+        // UI: collapsible panels, preview zoom, sticky offsets
+        // =====================================================================
+        let previewZoom = 100;
+        function setPreviewZoom(v) {
+            previewZoom = Math.max(30, Math.min(200, Math.round(+v || 100)));
+            document.getElementById('print-area').style.zoom = previewZoom / 100;
+            document.getElementById('preview-zoom').value = previewZoom;
+            document.getElementById('preview-zoom-val').textContent = previewZoom + '%';
+        }
+        function stepPreviewZoom(d) { setPreviewZoom(previewZoom + d); }
+        function fitPreviewWidth() {
+            const desk = document.getElementById('preview-desk');
+            const pagepx = 210 * 96 / 25.4;
+            setPreviewZoom((desk.clientWidth - 32) / pagepx * 100);
+        }
+
+
+        // =====================================================================
+        // Settings persistence / reset, drag & drop, shortcuts, checklist
+        // =====================================================================
+        const EXTRA_SETTING_IDS = ['duplex-mirror', 'cut-guides', 'print-sides'];
+        const NOT_SAVED_IDS = ['roster-search', 'roster-sort', 'roster-filter', 'select-all', 'camera-select', 'captured-photo-label'];
+        function collectSettings() {
+            const o = {};
+            const els = [...document.querySelectorAll('#control-panel [id]'), ...EXTRA_SETTING_IDS.map(id => document.getElementById(id))];
+            els.forEach(el => {
+                if (!el || !/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) return;
+                if (el.type === 'file' || el.type === 'button' || NOT_SAVED_IDS.includes(el.id)) return;
+                o[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+            });
+            return o;
+        }
+        function applySettings(o) {
+            Object.entries(o || {}).forEach(([id, v]) => {
+                const el = document.getElementById(id);
+                if (!el || el.type === 'file') return;
+                if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+            });
+            document.querySelectorAll('[data-bc]').forEach(bcLabel);
+        }
+        let DEFAULT_SETTINGS = {};
+        function resetDesign() {
+            if (!confirm('Reset fonts, sizes, colors and positions to their defaults?\n(School name, principal, school year and uploaded images are kept.)')) return;
+            const keep = ['school-name', 'principal-name', 'school-year'];
+            const d = {};
+            Object.keys(DEFAULT_SETTINGS).forEach(k => { if (!keep.includes(k)) d[k] = DEFAULT_SETTINGS[k]; });
+            applySettings(d);
+            renderAllCards();
+            toast('Design reset to defaults');
+        }
+
+        // Drag & drop anywhere on the page
+        let dragDepth = 0;
+        const overOn = e => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+        window.addEventListener('dragenter', e => { if (!overOn(e)) return; dragDepth++; document.getElementById('drop-overlay').classList.remove('hidden'); });
+        window.addEventListener('dragleave', e => { if (!overOn(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) document.getElementById('drop-overlay').classList.add('hidden'); });
+        window.addEventListener('dragover', e => { if (overOn(e)) e.preventDefault(); });
+        window.addEventListener('drop', e => {
+            if (!overOn(e)) return;
+            dragDepth = 0; document.getElementById('drop-overlay').classList.add('hidden');
+            if (e.target.closest && e.target.closest('input[type=file]')) return;     // let real file inputs handle their own drops
+            e.preventDefault();
+            handleDroppedFiles(e.dataTransfer.files);
+        });
+        function handleDroppedFiles(fileList) {
+            const files = Array.from(fileList);
+            const project = files.find(f => /\.json$/i.test(f.name));
+            const sheet = files.find(f => /\.(csv|xlsx|xls)$/i.test(f.name));
+            const images = files.filter(f => f.type.startsWith('image/'));
+            if (!project && !sheet && !images.length) { toast('Unsupported file. Drop a .csv/.xlsx, photos or a project .json'); return; }
+            if (project) {
+                const r = new FileReader();
+                r.onload = ev => { try { loadProjectData(JSON.parse(ev.target.result)); toast('Project loaded'); } catch (err) { alert('Could not read this project file: ' + err.message); } };
+                r.readAsText(project);
+                return;
+            }
+            if (sheet) importSpreadsheetFile(sheet);
+            if (images.length) setTimeout(() => handleBulkPhotoFiles(images), sheet ? 400 : 0);
+        }
+
+        // Keyboard shortcuts
+        function toggleHelp() { document.getElementById('help-modal').classList.toggle('hidden'); }
+        document.addEventListener('keydown', e => {
+            const tag = (e.target.tagName || '').toUpperCase();
+            const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
+            const mod = e.ctrlKey || e.metaKey;
+            const k = (e.key || '').toLowerCase();
+            if (k === 'escape') {
+                closeExport();
+                document.getElementById('help-modal').classList.add('hidden');
+                if (!document.getElementById('photo-manager-modal').classList.contains('hidden')) togglePhotoManager();
+            } else if (mod && k === 's') {
+                e.preventDefault(); exportProject(); toast('Project file saved');
+            } else if (mod && !typing && (k === 'z' && !e.shiftKey)) {
+                e.preventDefault(); undo();
+            } else if (mod && !typing && (k === 'y' || (k === 'z' && e.shiftKey))) {
+                e.preventDefault(); redo();
+            } else if (!mod && !typing && e.key === '?') {
+                toggleHelp();
+            }
+        });
+
+        // Quick-start checklist
+        function gotoPanel(key) {
+            const p = document.getElementById('panel-' + key);
+            if (!p) return;
+            p.classList.remove('collapsed');
+            p.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+        function updateChecklist() {
+            const box = document.getElementById('cl-steps');
+            if (!box) return;
+            const n = students.length;
+            const withPhoto = students.filter(s => s.photo && s.photo !== PLACEHOLDER_PHOTO).length;
+            const sn = document.getElementById('school-name').value, pn = document.getElementById('principal-name').value;
+            const steps = [
+                { label: 'Add students', hint: n ? `${n} added` : 'import or add', done: n > 0, go: () => gotoPanel('import') },
+                { label: 'Add photos', hint: n ? `${withPhoto}/${n}` : '', done: n > 0 && withPhoto === n, go: () => gotoPanel('photos') },
+                { label: 'Set school & principal', hint: '', done: sn !== 'APEX NATIONAL HIGH SCHOOL' && pn !== 'Dr. Eleanor Vance, Ph.D.', go: () => gotoPanel('school') },
+                { label: 'Add logo & signature', hint: 'optional', done: !!(logoUrl && signatureUrl), go: () => gotoPanel('design') },
+                { label: 'Print or download', hint: '', done: exportedOnce, go: () => openExport() }
+            ];
+            const done = steps.filter(x => x.done).length;
+            document.getElementById('cl-pct').textContent = Math.round(done / steps.length * 100) + '%';
+            document.getElementById('cl-bar').style.width = (done / steps.length * 100) + '%';
+            box.innerHTML = steps.map((x, i) => `<div class="cl-step ${x.done ? 'done' : ''}" data-i="${i}"><span class="cl-dot">${x.done ? '✓' : ''}</span><span class="cl-label font-semibold text-slate-700">${esc(x.label)}</span><span class="cl-hint">${esc(x.hint)}</span></div>`).join('');
+            box.querySelectorAll('.cl-step').forEach(el => el.onclick = () => steps[+el.dataset.i].go());
+        }
+
+        (function initPanels() {
+            const sec = document.getElementById('control-panel');
+            const openByDefault = [0, 1, 2, 3, 4];
+            const keys = ['import', 'roster', 'photos', 'school', 'design', 'typography', 'branding', 'qr'];
+            let idx = -1;
+            [...sec.children].forEach(panel => {
+                const h2 = panel.querySelector('h2');
+                if (!h2) return;
+                idx++;
+                panel.id = 'panel-' + (keys[idx] || idx);
+                panel.classList.add('panel');
+                const head = h2.parentElement === panel ? h2 : h2.parentElement;
+                head.classList.add('panel-head');
+                const body = document.createElement('div');
+                body.className = 'panel-body space-y-3';
+                [...panel.children].forEach(ch => { if (ch !== head) body.appendChild(ch); });
+                panel.appendChild(body);
+                const chev = document.createElement('span');
+                chev.className = 'chev'; chev.textContent = '▾';
+                h2.prepend(chev);
+                head.addEventListener('click', e => {
+                    if (e.target.closest('button,input,select,label,a')) return;
+                    panel.classList.toggle('collapsed');
+                });
+                if (!openByDefault.includes(idx)) panel.classList.add('collapsed');
+            });
+            function setHdr() { document.documentElement.style.setProperty('--hdr-h', document.querySelector('header').offsetHeight + 'px'); }
+            setHdr(); window.addEventListener('resize', setHdr);
+        })();
+
+        document.querySelectorAll('[data-bc]').forEach(bcLabel);
+
+        DEFAULT_SETTINGS = collectSettings();
+        updateUndoButtons();
+        if (!tryRestoreAutosave()) renderAllCards();
+    </script>
+</body>
+</html>
